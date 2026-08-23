@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const maxAttempts = 3
+
 func StartWorker(ctx context.Context, queries *db.Queries) {
 	for {
 		processed, err := ProcessOneJob(ctx, queries)
@@ -25,6 +27,23 @@ func StartWorker(ctx context.Context, queries *db.Queries) {
 	}
 }
 
+func ProcessJob(job db.Job) error {
+	fmt.Printf(
+		"Processing job %d, attempt %d/%d\n",
+		job.ID,
+		job.Attempts+1,
+		maxAttempts,
+	)
+
+	time.Sleep(3 * time.Second)
+
+	if job.Type == "fail_test" {
+		return errors.New("simulated job failure")
+	}
+
+	return nil
+}
+
 func ProcessOneJob(ctx context.Context, queries *db.Queries) (bool, error) {
 	job, err := queries.ClaimPendingJob(ctx)
 
@@ -36,9 +55,28 @@ func ProcessOneJob(ctx context.Context, queries *db.Queries) (bool, error) {
 		return false, err
 	}
 
-	fmt.Println("Processing job:", job.ID)
+	err = ProcessJob(job)
+	if err != nil {
+		markErr := queries.MarkJobFailed(ctx, job.ID)
+		if markErr != nil {
+			return false, markErr
+		}
 
-	time.Sleep(3 * time.Second)
+		if job.Attempts+1 < maxAttempts {
+			err = queries.ScheduleRetry(ctx, job.ID)
+			if err != nil {
+				return false, err
+			}
+		}
+
+		fmt.Printf(
+			"Job %d failed on attempt %d\n",
+			job.ID,
+			job.Attempts+1,
+		)
+
+		return true, nil
+	}
 
 	err = queries.MarkJobCompleted(ctx, job.ID)
 	if err != nil {

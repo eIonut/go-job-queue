@@ -1,0 +1,2 @@
+ALTER TABLE jobs 
+ADD COLUMN retry_at TIMESTAMP NULL;

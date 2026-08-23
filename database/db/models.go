@@ -16,4 +16,5 @@ type Job struct {
 	Attempts  int32
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+	RetryAt   pgtype.Timestamp
 }

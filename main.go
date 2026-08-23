@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const workers = 5
+
 func main() {
 	ctx := context.Background()
 
@@ -28,7 +30,7 @@ func main() {
 
 	queries := db.New(pool)
 
-	for range 5 {
+	for range workers {
 		go worker.StartWorker(ctx, queries)
 	}
 

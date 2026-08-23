@@ -14,6 +14,7 @@ WITH next_job AS (
     SELECT id
     FROM jobs
     WHERE status = 'pending'
+    AND (retry_at IS NULL OR retry_at <= NOW())
     ORDER BY created_at
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -21,7 +22,7 @@ WITH next_job AS (
 UPDATE jobs
 SET status = 'running', updated_at = NOW()
 WHERE id = (SELECT id FROM next_job)
-RETURNING id, type, payload, status, attempts, created_at, updated_at
+RETURNING id, type, payload, status, attempts, created_at, updated_at, retry_at
 `
 
 func (q *Queries) ClaimPendingJob(ctx context.Context) (Job, error) {
@@ -35,6 +36,7 @@ func (q *Queries) ClaimPendingJob(ctx context.Context) (Job, error) {
 		&i.Attempts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RetryAt,
 	)
 	return i, err
 }
@@ -48,7 +50,7 @@ VALUES (
     $1,
     $2
 )
-RETURNING id, type, payload, status, attempts, created_at, updated_at
+RETURNING id, type, payload, status, attempts, created_at, updated_at, retry_at
 `
 
 type CreateJobParams struct {
@@ -67,12 +69,13 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.Attempts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RetryAt,
 	)
 	return i, err
 }
 
 const getPendingJob = `-- name: GetPendingJob :one
-SELECT id, type, payload, status, attempts, created_at, updated_at 
+SELECT id, type, payload, status, attempts, created_at, updated_at, retry_at 
 FROM jobs
 WHERE status = 'pending'
 ORDER BY created_at
@@ -90,18 +93,30 @@ func (q *Queries) GetPendingJob(ctx context.Context) (Job, error) {
 		&i.Attempts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RetryAt,
 	)
 	return i, err
 }
 
 const markJobCompleted = `-- name: MarkJobCompleted :exec
 UPDATE jobs
-SET status = 'completed', updated_at = NOW()
+SET status = 'completed', updated_at = NOW(), retry_at = NULL
 where id = $1
 `
 
 func (q *Queries) MarkJobCompleted(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markJobCompleted, id)
+	return err
+}
+
+const markJobFailed = `-- name: MarkJobFailed :exec
+UPDATE jobs
+SET status = 'failed', attempts = attempts + 1,  updated_at = NOW()
+where id = $1
+`
+
+func (q *Queries) MarkJobFailed(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markJobFailed, id)
 	return err
 }
 
@@ -113,5 +128,18 @@ WHERE id = $1
 
 func (q *Queries) MarkJobRunning(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markJobRunning, id)
+	return err
+}
+
+const scheduleRetry = `-- name: ScheduleRetry :exec
+UPDATE jobs
+SET status = 'pending', 
+    retry_at = NOW() + INTERVAL '10 seconds',
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) ScheduleRetry(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, scheduleRetry, id)
 	return err
 }
