@@ -9,6 +9,36 @@ import (
 	"context"
 )
 
+const claimPendingJob = `-- name: ClaimPendingJob :one
+WITH next_job AS (
+    SELECT id
+    FROM jobs
+    WHERE status = 'pending'
+    ORDER BY created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE jobs
+SET status = 'running', updated_at = NOW()
+WHERE id = (SELECT id FROM next_job)
+RETURNING id, type, payload, status, attempts, created_at, updated_at
+`
+
+func (q *Queries) ClaimPendingJob(ctx context.Context) (Job, error) {
+	row := q.db.QueryRow(ctx, claimPendingJob)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createJob = `-- name: CreateJob :one
 INSERT INTO jobs (
     type,
@@ -39,4 +69,49 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getPendingJob = `-- name: GetPendingJob :one
+SELECT id, type, payload, status, attempts, created_at, updated_at 
+FROM jobs
+WHERE status = 'pending'
+ORDER BY created_at
+LIMIT 1
+`
+
+func (q *Queries) GetPendingJob(ctx context.Context) (Job, error) {
+	row := q.db.QueryRow(ctx, getPendingJob)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markJobCompleted = `-- name: MarkJobCompleted :exec
+UPDATE jobs
+SET status = 'completed', updated_at = NOW()
+where id = $1
+`
+
+func (q *Queries) MarkJobCompleted(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markJobCompleted, id)
+	return err
+}
+
+const markJobRunning = `-- name: MarkJobRunning :exec
+UPDATE jobs
+SET status = 'running', updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) MarkJobRunning(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markJobRunning, id)
+	return err
 }
