@@ -54,12 +54,9 @@ func main() {
 			cfg.PollInterval,
 		)
 
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			w.Start(ctx)
-		}()
+		})
 	}
 
 	handler := api.NewHandler(queries)

@@ -10,8 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const maxAttempts = 3
-
 type Worker struct {
 	queries      *db.Queries
 	maxAttempts  int

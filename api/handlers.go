@@ -41,7 +41,12 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 
-	json.NewEncoder(w).Encode(job)
+	err = json.NewEncoder(w).Encode(job)
+
+	if err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
@@ -81,5 +86,10 @@ func (h *Handler) GetJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jobs)
+
+	err = json.NewEncoder(w).Encode(jobs)
+	if err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
