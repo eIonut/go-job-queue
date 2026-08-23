@@ -74,6 +74,63 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 	return i, err
 }
 
+const getJob = `-- name: GetJob :one
+SELECT id, type, payload, status, attempts, created_at, updated_at, retry_at
+FROM jobs
+WHERE id = $1
+`
+
+func (q *Queries) GetJob(ctx context.Context, id int64) (Job, error) {
+	row := q.db.QueryRow(ctx, getJob, id)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RetryAt,
+	)
+	return i, err
+}
+
+const getJobs = `-- name: GetJobs :many
+SELECT id, type, payload, status, attempts, created_at, updated_at, retry_at 
+FROM jobs
+ORDER BY created_at DESC
+`
+
+func (q *Queries) GetJobs(ctx context.Context) ([]Job, error) {
+	rows, err := q.db.Query(ctx, getJobs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Payload,
+			&i.Status,
+			&i.Attempts,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RetryAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPendingJob = `-- name: GetPendingJob :one
 SELECT id, type, payload, status, attempts, created_at, updated_at, retry_at 
 FROM jobs

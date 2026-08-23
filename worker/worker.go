@@ -12,27 +12,67 @@ import (
 
 const maxAttempts = 3
 
-func StartWorker(ctx context.Context, queries *db.Queries) {
+type Worker struct {
+	queries      *db.Queries
+	maxAttempts  int
+	pollInterval time.Duration
+}
+
+func NewWorker(
+	queries *db.Queries,
+	maxAttempts int,
+	pollInterval time.Duration,
+) *Worker {
+	return &Worker{
+		queries:      queries,
+		maxAttempts:  maxAttempts,
+		pollInterval: pollInterval,
+	}
+}
+
+func (w *Worker) Start(ctx context.Context) {
 	for {
-		processed, err := ProcessOneJob(ctx, queries)
+		select {
+		case <-ctx.Done():
+			fmt.Println("Worker stopped")
+			return
+		default:
+		}
+
+		processed, err := w.ProcessOneJob(ctx)
+
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+
 		if err != nil {
 			fmt.Println("Worker error:", err)
-			time.Sleep(1 * time.Second)
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(w.pollInterval):
+			}
+
 			continue
 		}
 
 		if !processed {
-			time.Sleep(1 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(w.pollInterval):
+			}
 		}
 	}
 }
 
-func ProcessJob(job db.Job) error {
+func (w *Worker) ProcessJob(job db.Job) error {
 	fmt.Printf(
 		"Processing job %d, attempt %d/%d\n",
 		job.ID,
 		job.Attempts+1,
-		maxAttempts,
+		w.maxAttempts,
 	)
 
 	time.Sleep(3 * time.Second)
@@ -44,8 +84,8 @@ func ProcessJob(job db.Job) error {
 	return nil
 }
 
-func ProcessOneJob(ctx context.Context, queries *db.Queries) (bool, error) {
-	job, err := queries.ClaimPendingJob(ctx)
+func (w *Worker) ProcessOneJob(ctx context.Context) (bool, error) {
+	job, err := w.queries.ClaimPendingJob(ctx)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -55,15 +95,23 @@ func ProcessOneJob(ctx context.Context, queries *db.Queries) (bool, error) {
 		return false, err
 	}
 
-	err = ProcessJob(job)
+	// From this point onward, the job has already been claimed.
+	// Give it its own context so it can finish even if shutdown starts.
+	jobCtx, cancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	defer cancel()
+
+	err = w.ProcessJob(job)
 	if err != nil {
-		markErr := queries.MarkJobFailed(ctx, job.ID)
+		markErr := w.queries.MarkJobFailed(jobCtx, job.ID)
 		if markErr != nil {
 			return false, markErr
 		}
 
-		if job.Attempts+1 < maxAttempts {
-			err = queries.ScheduleRetry(ctx, job.ID)
+		if job.Attempts+1 < int32(w.maxAttempts) {
+			err = w.queries.ScheduleRetry(jobCtx, job.ID)
 			if err != nil {
 				return false, err
 			}
@@ -78,7 +126,7 @@ func ProcessOneJob(ctx context.Context, queries *db.Queries) (bool, error) {
 		return true, nil
 	}
 
-	err = queries.MarkJobCompleted(ctx, job.ID)
+	err = w.queries.MarkJobCompleted(jobCtx, job.ID)
 	if err != nil {
 		return false, err
 	}

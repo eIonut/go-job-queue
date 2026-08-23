@@ -9,6 +9,16 @@ VALUES (
 )
 RETURNING *;
 
+-- name: GetJob :one
+SELECT *
+FROM jobs
+WHERE id = $1;
+
+-- name: GetJobs :many
+SELECT * 
+FROM jobs
+ORDER BY created_at DESC;
+
 -- name: GetPendingJob :one
 SELECT * 
 FROM jobs
